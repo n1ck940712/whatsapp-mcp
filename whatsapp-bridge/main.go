@@ -498,11 +498,19 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			fmt.Printf("[%s] %s %s: %s\n", timestamp, direction, sender, content)
 		}
 	}
+	fmt.Println("triggering webhook...", err)
 
 	// Send payload to agent endpoint
-	_ = postJSON("/webhooks/whatsapp", map[string]any{
-		"type": "message_out_sent",
+	err = postJSON("/webhooks/whatsapp", map[string]any{
+		"type":    "message_out_sent",
+		"content": content,
+		"phone":   sender,
 	})
+	if err != nil {
+		fmt.Printf("webhook POST failed: %v\n", err)
+	} else {
+		fmt.Println("webhook POST succeeded")
+	}
 }
 
 // DownloadMediaRequest represents the request body for the download media API
@@ -1389,7 +1397,7 @@ var httpClient = &http.Client{
 func postJSON(path string, payload any) error {
 	appURL := os.Getenv("APP_URL")
 	if appURL == "" {
-		appURL = "http://agent:8080" // default for docker compose service
+		appURL = "http://agent:8001" // default for docker compose service
 	}
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequest("POST", strings.TrimRight(appURL, "/")+path, bytes.NewReader(body))

@@ -66,7 +66,7 @@ func NewMessageStore() (*MessageStore, error) {
 			name TEXT,
 			last_message_time TIMESTAMP
 		);
-		
+
 		CREATE TABLE IF NOT EXISTS messages (
 			id TEXT,
 			chat_jid TEXT,
@@ -116,8 +116,8 @@ func (store *MessageStore) StoreMessage(id, chatJID, sender, content string, tim
 	}
 
 	_, err := store.db.Exec(
-		`INSERT OR REPLACE INTO messages 
-		(id, chat_jid, sender, content, timestamp, is_from_me, media_type, filename, url, media_key, file_sha256, file_enc_sha256, file_length) 
+		`INSERT OR REPLACE INTO messages
+		(id, chat_jid, sender, content, timestamp, is_from_me, media_type, filename, url, media_key, file_sha256, file_enc_sha256, file_length)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, chatJID, sender, content, timestamp, isFromMe, mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength,
 	)
@@ -498,6 +498,11 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			fmt.Printf("[%s] %s %s: %s\n", timestamp, direction, sender, content)
 		}
 	}
+
+	// Send payload to agent endpoint
+	_ = postJSON("/webhooks/whatsapp", map[string]any{
+		"type": "message_out_sent",
+	})
 }
 
 // DownloadMediaRequest represents the request body for the download media API
@@ -1375,4 +1380,44 @@ func placeholderWaveform(duration uint32) []byte {
 	}
 
 	return waveform
+}
+
+var httpClient = &http.Client{
+	Timeout: 5 * time.Second,
+}
+
+func postJSON(path string, payload any) error {
+	appURL := os.Getenv("APP_URL")
+	if appURL == "" {
+		appURL = "http://agent:8080" // default for docker compose service
+	}
+	body, _ := json.Marshal(payload)
+	req, err := http.NewRequest("POST", strings.TrimRight(appURL, "/")+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	// // optional: HMAC signing
+	// secret := os.Getenv("APP_WEBHOOK_SECRET")
+	// if secret != "" {
+	// 	mac := hmac.New(sha256.New, []byte(secret))
+	// 	mac.Write(body)
+	// 	sig := hex.EncodeToString(mac.Sum(nil))
+	// 	req.Header.Set("X-WA-Signature", sig)
+	// }
+
+	// simple retry
+	for i := 0; i < 3; i++ {
+		resp, err := httpClient.Do(req)
+		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			resp.Body.Close()
+			return nil
+		}
+		if err == nil {
+			resp.Body.Close()
+		}
+		time.Sleep(time.Duration(300*(i+1)) * time.Millisecond)
+	}
+	return fmt.Errorf("failed to POST %s after retries", path)
 }

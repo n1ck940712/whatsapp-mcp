@@ -499,12 +499,18 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		}
 	}
 	fmt.Println("triggering webhook...", err)
+	var phone string
+	if msg.Info.IsFromMe {
+		phone = msg.Info.Chat.User
+	} else {
+		phone = sender
+	}
 
 	// Send payload to agent endpoint
 	err = postJSON("/webhooks/whatsapp", map[string]any{
 		"type":    "message_out_sent",
 		"content": content,
-		"phone":   sender,
+		"phone":   phone,
 	})
 	if err != nil {
 		fmt.Printf("webhook POST failed: %v\n", err)

@@ -369,6 +369,12 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 
 	fmt.Printf("SendMessageResponse: %+v\n", SendMessageResponse)
 
+	err = datastore.StoreChat(recipientJID.String(), recipient, SendMessageResponse.Timestamp)
+
+	if err != nil {
+		return false, fmt.Sprintf("Failed to store chat: %v", err)
+	}
+
 	err = datastore.StoreMessage(
 		SendMessageResponse.ID,
 		recipientJID.String(),
@@ -498,7 +504,7 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			fmt.Printf("[%s] %s %s: %s\n", timestamp, direction, sender, content)
 		}
 	}
-	fmt.Println("triggering webhook...", err)
+	fmt.Println("triggering webhook...")
 	var phone string
 	if msg.Info.IsFromMe {
 		phone = msg.Info.Chat.User

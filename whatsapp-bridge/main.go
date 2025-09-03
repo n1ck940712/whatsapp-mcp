@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -200,6 +201,15 @@ type SendMessageRequest struct {
 	Recipient string `json:"recipient"`
 	Message   string `json:"message"`
 	MediaPath string `json:"media_path,omitempty"`
+}
+
+type SendContactRequest struct {
+	Recipient string `json:"recipient"` // "60123456789" or "60123456789@s.whatsapp.net"
+	FullName  string `json:"full_name"`
+	Phone     string `json:"phone"` // E.164, e.g. "+60123456789"
+	Org       string `json:"org,omitempty"`
+	Title     string `json:"title,omitempty"`
+	Email     string `json:"email,omitempty"`
 }
 
 // Function to send a WhatsApp message
@@ -829,6 +839,31 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 		})
 	})
 
+	// Handler: send a contact card (vCard)
+	http.HandleFunc("/api/send_contact", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req SendContactRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request", http.StatusBadRequest)
+			return
+		}
+
+		ok, msg := sendWhatsAppContact(client, req)
+
+		w.Header().Set("Content-Type", "application/json")
+		if !ok {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		_ = json.NewEncoder(w).Encode(SendMessageResponse{
+			Success: ok,
+			Message: msg,
+		})
+	})
+
 	// Start the server
 	serverAddr := fmt.Sprintf(":%d", port)
 	fmt.Printf("Starting REST API server on %s...\n", serverAddr)
@@ -1440,4 +1475,73 @@ func postJSON(path string, payload any) error {
 		time.Sleep(time.Duration(300*(i+1)) * time.Millisecond)
 	}
 	return fmt.Errorf("failed to POST %s after retries", path)
+}
+
+var nonDigit = regexp.MustCompile(`\D+`)
+
+func buildVCard(fullName, phone, org, title, email string) string {
+	// normalize for waid (digits only) and display phone (ensure leading +)
+	waid := nonDigit.ReplaceAllString(phone, "") // e.g. "+6012-8081725" -> "60128081725"
+	display := phone
+	if !strings.HasPrefix(display, "+") {
+		display = "+" + display
+	}
+
+	lines := []string{
+		"BEGIN:VCARD",
+		"VERSION:3.0",
+		fmt.Sprintf("FN:%s", fullName),
+		fmt.Sprintf("TEL;TYPE=CELL;waid=%s:%s", waid, display),
+	}
+	if org != "" {
+		lines = append(lines, fmt.Sprintf("ORG:%s", org))
+	}
+	if title != "" {
+		lines = append(lines, fmt.Sprintf("TITLE:%s", title))
+	}
+	if email != "" {
+		lines = append(lines, fmt.Sprintf("EMAIL;TYPE=INTERNET:%s", email))
+	}
+	lines = append(lines, "END:VCARD")
+	return strings.Join(lines, "\n")
+}
+
+// Common helper: parse recipient into types.JID
+func parseRecipientJID(recipient string) (types.JID, error) {
+	if strings.Contains(recipient, "@") {
+		return types.ParseJID(recipient)
+	}
+	return types.JID{User: recipient, Server: "s.whatsapp.net"}, nil
+}
+
+// Send a single contact card
+func sendWhatsAppContact(client *whatsmeow.Client, req SendContactRequest) (bool, string) {
+	if !client.IsConnected() {
+		return false, "Not connected to WhatsApp"
+	}
+
+	jid, err := parseRecipientJID(req.Recipient)
+	if err != nil {
+		return false, fmt.Sprintf("Invalid recipient: %v", err)
+	}
+	if req.FullName == "" || req.Phone == "" {
+		return false, "full_name and phone are required"
+	}
+
+	vcard := buildVCard(req.FullName, req.Phone, req.Org, req.Title, req.Email)
+
+	msg := &waProto.Message{
+		ContactMessage: &waProto.ContactMessage{
+			DisplayName: proto.String(req.FullName),
+			Vcard:       proto.String(vcard),
+		},
+	}
+
+	resp, err := client.SendMessage(context.Background(), jid, msg)
+	if err != nil {
+		return false, fmt.Sprintf("Error sending contact: %v", err)
+	}
+
+	fmt.Printf("Contact sent: %+v\n", resp)
+	return true, "Contact card sent"
 }

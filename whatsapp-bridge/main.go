@@ -514,6 +514,13 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 			fmt.Printf("[%s] %s %s: %s\n", timestamp, direction, sender, content)
 		}
 	}
+	// Decide whether to hit webhook (skip for group messages)
+	isGroup := msg.Info.Chat.Server == "g.us"
+	if isGroup {
+		logger.Infof("Skipping webhook for group chat %s (sender %s)", chatJID, sender)
+		return
+	}
+
 	fmt.Println("triggering webhook...")
 	var phone string
 	if msg.Info.IsFromMe {

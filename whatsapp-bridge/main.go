@@ -55,8 +55,25 @@ func init() {
 	storeBasePath = strings.TrimSpace(os.Getenv("WA_DB_PATH"))
 }
 
+func resolveStoreBasePath(base string) (string, error) {
+	base = strings.TrimSpace(base)
+	if base == "" {
+		return "", fmt.Errorf("WA_DB_PATH not set")
+	}
+	if !filepath.IsAbs(base) {
+		base = filepath.Join("/app/whatsapp-bridge", base)
+	}
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		return "", fmt.Errorf("mkdir %s: %w", base, err)
+	}
+	return base, nil
+}
+
 func sqliteDSN(path string) string {
-	return fmt.Sprintf("file:%s?_foreign_keys=on", filepath.ToSlash(path))
+	return fmt.Sprintf(
+		"file:%s?mode=rwc&_foreign_keys=on&_busy_timeout=30000",
+		filepath.ToSlash(path),
+	)
 }
 
 // Initialize message store
@@ -67,7 +84,11 @@ func NewMessageStore() (*MessageStore, error) {
 	}
 
 	// Open SQLite database for messages
-	messagesDBPath := filepath.Join(storeBasePath, "messages.db")
+	absBase, err := resolveStoreBasePath(storeBasePath)
+	if err != nil {
+		return nil, err
+	}
+	messagesDBPath := filepath.Join(absBase, "messages.db")
 	fmt.Printf("Opening message SQLite database at %s\n", messagesDBPath)
 	db, err := sql.Open("sqlite3", sqliteDSN(messagesDBPath))
 	if err != nil {
@@ -926,7 +947,13 @@ func main() {
 		return
 	}
 
-	sessionDBPath := filepath.Join(storeBasePath, "whatsapp.db")
+	absBase, err := resolveStoreBasePath(storeBasePath)
+	if err != nil {
+		logger.Errorf("%v", err)
+		return
+	}
+
+	sessionDBPath := filepath.Join(absBase, "whatsapp.db")
 	logger.Infof("Opening session SQLite database at %s", sessionDBPath)
 	container, err := sqlstore.New(context.Background(), "sqlite3", sqliteDSN(sessionDBPath), dbLog)
 	if err != nil {

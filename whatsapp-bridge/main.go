@@ -68,6 +68,7 @@ func NewMessageStore() (*MessageStore, error) {
 
 	// Open SQLite database for messages
 	messagesDBPath := filepath.Join(storeBasePath, "messages.db")
+	fmt.Printf("Opening message SQLite database at %s\n", messagesDBPath)
 	db, err := sql.Open("sqlite3", sqliteDSN(messagesDBPath))
 	if err != nil {
 		return nil, fmt.Errorf("failed to open message database: %v", err)
@@ -914,6 +915,7 @@ func main() {
 	// Set up logger
 	logger := waLog.Stdout("Client", "INFO", true)
 	logger.Infof("Starting WhatsApp client...")
+	logger.Infof("Using store base path: %s", storeBasePath)
 
 	// Create database connection for storing session data
 	dbLog := waLog.Stdout("Database", "INFO", true)
@@ -925,6 +927,7 @@ func main() {
 	}
 
 	sessionDBPath := filepath.Join(storeBasePath, "whatsapp.db")
+	logger.Infof("Opening session SQLite database at %s", sessionDBPath)
 	container, err := sqlstore.New(context.Background(), "sqlite3", sqliteDSN(sessionDBPath), dbLog)
 	if err != nil {
 		logger.Errorf("Failed to connect to database: %v", err)

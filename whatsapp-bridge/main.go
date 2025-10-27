@@ -783,6 +783,7 @@ func extractDirectPathFromURL(url string) string {
 }
 
 // Start a REST API server to expose the WhatsApp client functionality
+// Note: Only WhatsApp traffic uses WA_PROXY (if set). App webhooks use direct connections.
 func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port int) {
 	// Handler for sending messages
 	http.HandleFunc("/api/send", func(w http.ResponseWriter, r *http.Request) {
@@ -979,6 +980,14 @@ func main() {
 	if client == nil {
 		logger.Errorf("Failed to create WhatsApp client")
 		return
+	}
+
+	if px := strings.TrimSpace(os.Getenv("WA_PROXY")); px != "" {
+		if err := client.SetProxyAddress(px); err != nil {
+			logger.Errorf("Invalid WA_PROXY: %v", err)
+		} else {
+			logger.Infof("Using WA proxy: %s", px)
+		}
 	}
 
 	// Initialize message store
@@ -1504,6 +1513,10 @@ func placeholderWaveform(duration uint32) []byte {
 
 var httpClient = &http.Client{
 	Timeout: 5 * time.Second,
+	Transport: &http.Transport{
+		// Force no-proxy for internal app-to-app calls regardless of env
+		Proxy: nil,
+	},
 }
 
 func postJSON(path string, payload any) error {

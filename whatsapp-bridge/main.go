@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
 	"net/http"
@@ -989,6 +990,18 @@ func main() {
 			logger.Infof("Using WA proxy: %s", px)
 		}
 	}
+
+	go func() {
+		resp, err := http.Get("https://ipinfo.io/ip")
+		if err != nil {
+			logger.Warnf("Failed to get external IP: %v", err)
+			return
+		}
+		defer resp.Body.Close()
+
+		ipBytes, _ := io.ReadAll(resp.Body)
+		fmt.Printf("Container external (proxy) IP: %s\n", strings.TrimSpace(string(ipBytes)))
+	}()
 
 	// Initialize message store
 	messageStore, err := NewMessageStore()

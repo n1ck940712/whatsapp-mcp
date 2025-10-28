@@ -10,6 +10,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -54,6 +55,21 @@ var (
 
 func init() {
 	storeBasePath = strings.TrimSpace(os.Getenv("WA_DB_PATH"))
+}
+
+func proxyAwareHTTPClient() *http.Client {
+	px := strings.TrimSpace(os.Getenv("WA_PROXY"))
+	if px == "" {
+		return http.DefaultClient
+	}
+	u, err := url.Parse(px)
+	if err != nil {
+		return http.DefaultClient
+	}
+	return &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: &http.Transport{Proxy: http.ProxyURL(u)},
+	}
 }
 
 func resolveStoreBasePath(base string) (string, error) {
@@ -992,13 +1008,13 @@ func main() {
 	}
 
 	go func() {
-		resp, err := http.Get("https://ipinfo.io/ip")
+		client := proxyAwareHTTPClient()
+		resp, err := client.Get("https://ipinfo.io/ip")
 		if err != nil {
-			logger.Warnf("Failed to get external IP: %v", err)
+			logger.Warnf("Failed to get external IP (proxy-aware): %v", err)
 			return
 		}
 		defer resp.Body.Close()
-
 		ipBytes, _ := io.ReadAll(resp.Body)
 		fmt.Printf("Container external (proxy) IP: %s\n", strings.TrimSpace(string(ipBytes)))
 	}()

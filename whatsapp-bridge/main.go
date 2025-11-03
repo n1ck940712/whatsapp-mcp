@@ -1702,18 +1702,15 @@ func postJSON(path string, payload any) error {
 	// }
 
 	// simple retry
-	for i := 0; i < 3; i++ {
-		resp, err := httpClient.Do(req)
-		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			resp.Body.Close()
-			return nil
-		}
-		if err == nil {
-			resp.Body.Close()
-		}
-		time.Sleep(time.Duration(300*(i+1)) * time.Millisecond)
+	resp, err := httpClient.Do(req)
+	if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		resp.Body.Close()
+		return nil
 	}
-	return fmt.Errorf("failed to POST %s after retries", path)
+	if err == nil {
+		resp.Body.Close()
+	}
+	return fmt.Errorf("failed to POST %s", path)
 }
 
 var nonDigit = regexp.MustCompile(`\D+`)

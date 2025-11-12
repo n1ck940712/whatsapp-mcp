@@ -635,31 +635,31 @@ func handleMessage(client *whatsmeow.Client, messageStore *MessageStore, msg *ev
 		}
 	}
 	// Decide whether to hit webhook (skip for group messages)
-	isGroup := msg.Info.Chat.Server == "g.us"
-	if isGroup {
-		logger.Infof("Skipping webhook for group chat %s (sender %s)", chatJID, sender)
-		return
-	}
+	// isGroup := msg.Info.Chat.Server == "g.us"
+	// if isGroup {
+	// 	logger.Infof("Skipping webhook for group chat %s (sender %s)", chatJID, sender)
+	// 	return
+	// }
 
-	logger.Infof("Triggering webhook for chat %s (sender %s)", chatJID, sender)
-	var phone string
-	if msg.Info.IsFromMe {
-		phone = msg.Info.Chat.User
-	} else {
-		phone = sender
-	}
+	// logger.Infof("Triggering webhook for chat %s (sender %s)", chatJID, sender)
+	// var phone string
+	// if msg.Info.IsFromMe {
+	// 	phone = msg.Info.Chat.User
+	// } else {
+	// 	phone = sender
+	// }
 
-	// Send payload to agent endpoint
-	err = postJSON("/webhooks/whatsapp", map[string]any{
-		"type":    "message_out_sent",
-		"content": content,
-		"phone":   phone,
-	})
-	if err != nil {
-		logger.Errorf("Webhook POST failed: %v", err)
-	} else {
-		logger.Infof("Webhook POST succeeded")
-	}
+	// // Send payload to agent endpoint
+	// err = postJSON("/webhooks/whatsapp", map[string]any{
+	// 	"type":    "message_out_sent",
+	// 	"content": content,
+	// 	"phone":   phone,
+	// })
+	// if err != nil {
+	// 	logger.Errorf("Webhook POST failed: %v", err)
+	// } else {
+	// 	logger.Infof("Webhook POST succeeded")
+	// }
 }
 
 // DownloadMediaRequest represents the request body for the download media API

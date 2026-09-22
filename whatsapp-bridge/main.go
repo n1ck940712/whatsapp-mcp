@@ -329,6 +329,28 @@ type SendContactRequest struct {
 	Email     string `json:"email,omitempty"`
 }
 
+type SendDocumentRequest struct {
+	Recipient string `json:"recipient"`
+	Filename  string `json:"filename"`
+	Caption   string `json:"caption,omitempty"`
+	Data      string `json:"data"`
+	DataB64   string `json:"data_base64"`
+}
+
+func parseRecipientJID(recipient string) (types.JID, error) {
+	recipient = strings.TrimSpace(recipient)
+	if strings.Contains(recipient, "@") {
+		return types.ParseJID(recipient)
+	}
+	if strings.HasPrefix(recipient, "120363") {
+		return types.JID{User: recipient, Server: "g.us"}, nil
+	}
+	if len(recipient) >= 14 && !strings.HasPrefix(recipient, "60") {
+		return types.JID{User: recipient, Server: "lid"}, nil
+	}
+	return types.JID{User: recipient, Server: "s.whatsapp.net"}, nil
+}
+
 // Function to send a WhatsApp message
 func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message string, mediaPath string, datastore *MessageStore, logger leveledLogger) (bool, string) {
 	if !client.IsConnected() {
@@ -336,25 +358,9 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 		return false, "Not connected to WhatsApp"
 	}
 
-	// Create JID for recipient
-	var recipientJID types.JID
-	var err error
-
-	// Check if recipient is a JID
-	isJID := strings.Contains(recipient, "@")
-
-	if isJID {
-		// Parse the JID string
-		recipientJID, err = types.ParseJID(recipient)
-		if err != nil {
-			return false, fmt.Sprintf("Error parsing JID: %v", err)
-		}
-	} else {
-		// Create JID from phone number
-		recipientJID = types.JID{
-			User:   recipient,
-			Server: "s.whatsapp.net", // For personal chats
-		}
+	recipientJID, err := parseRecipientJID(recipient)
+	if err != nil {
+		return false, fmt.Sprintf("Error parsing JID: %v", err)
 	}
 
 	msg := &waProto.Message{}
@@ -403,6 +409,10 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 		case "mov":
 			mediaType = whatsmeow.MediaVideo
 			mimeType = "video/quicktime"
+
+		case "pdf":
+			mediaType = whatsmeow.MediaDocument
+			mimeType = "application/pdf"
 
 		// Document types (for any other file type)
 		default:
@@ -857,6 +867,65 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 		}
 
 		// Send response
+		_ = json.NewEncoder(w).Encode(SendMessageResponse{
+			Success: success,
+			Message: message,
+		})
+	})
+
+	http.HandleFunc("/api/send-document", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req SendDocumentRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request format", http.StatusBadRequest)
+			logger.Warnf("Invalid send-document request payload: %v", err)
+			return
+		}
+		encoded := strings.TrimSpace(req.DataB64)
+		if encoded == "" {
+			encoded = strings.TrimSpace(req.Data)
+		}
+		if req.Recipient == "" || encoded == "" {
+			http.Error(w, "Recipient and data are required", http.StatusBadRequest)
+			return
+		}
+
+		payload, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			http.Error(w, "Invalid base64 data", http.StatusBadRequest)
+			return
+		}
+
+		filename := strings.TrimSpace(req.Filename)
+		if filename == "" {
+			filename = "document.pdf"
+		}
+		filename = filepath.Base(filename)
+
+		tmpDir, err := os.MkdirTemp("", "wa-doc-*")
+		if err != nil {
+			http.Error(w, "Failed to create temp dir", http.StatusInternalServerError)
+			return
+		}
+		defer os.RemoveAll(tmpDir)
+		tmpPath := filepath.Join(tmpDir, filename)
+		if err := os.WriteFile(tmpPath, payload, 0o600); err != nil {
+			http.Error(w, "Failed to write temp file", http.StatusInternalServerError)
+			return
+		}
+
+		logger.Infof("Received request to send document; recipient=%s filename=%s bytes=%d", req.Recipient, filename, len(payload))
+		success, message := sendWhatsAppMessage(client, req.Recipient, req.Caption, tmpPath, messageStore, logger)
+		logger.Infof("Send-document result for %s: success=%t detail=%s", req.Recipient, success, message)
+
+		w.Header().Set("Content-Type", "application/json")
+		if !success {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
 		_ = json.NewEncoder(w).Encode(SendMessageResponse{
 			Success: success,
 			Message: message,

@@ -1761,14 +1761,6 @@ func buildVCard(fullName, phone, org, title, email string) string {
 	return strings.Join(lines, "\n")
 }
 
-// Common helper: parse recipient into types.JID
-func parseRecipientJID(recipient string) (types.JID, error) {
-	if strings.Contains(recipient, "@") {
-		return types.ParseJID(recipient)
-	}
-	return types.JID{User: recipient, Server: "s.whatsapp.net"}, nil
-}
-
 // Send a single contact card
 func sendWhatsAppContact(client *whatsmeow.Client, req SendContactRequest, logger leveledLogger) (bool, string) {
 	if !client.IsConnected() {

@@ -879,6 +879,28 @@ func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, message
 // Start a REST API server to expose the WhatsApp client functionality
 // Note: Only WhatsApp traffic uses WA_PROXY (if set). App webhooks use direct connections.
 func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port int, logger leveledLogger) {
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		connected := client.IsConnected()
+		loggedIn := client.IsLoggedIn()
+		ready := connected && loggedIn
+		w.Header().Set("Content-Type", "application/json")
+		if !ready {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+		if r.Method == http.MethodHead {
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ready":     ready,
+			"connected": connected,
+			"logged_in": loggedIn,
+		})
+	})
+
 	// Handler for sending messages
 	http.HandleFunc("/api/send", func(w http.ResponseWriter, r *http.Request) {
 		// Only allow POST requests

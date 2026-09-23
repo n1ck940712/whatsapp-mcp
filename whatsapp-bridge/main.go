@@ -518,9 +518,10 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 				FileLength:    &resp.FileLength,
 			}
 		case whatsmeow.MediaDocument:
-			msg.DocumentMessage = &waProto.DocumentMessage{
-				Title:         proto.String(mediaPath[strings.LastIndex(mediaPath, "/")+1:]),
-				Caption:       proto.String(message),
+			fileName := filepath.Base(mediaPath)
+			document := &waProto.DocumentMessage{
+				Title:         proto.String(fileName),
+				FileName:      proto.String(fileName),
 				Mimetype:      proto.String(mimeType),
 				URL:           &resp.URL,
 				DirectPath:    &resp.DirectPath,
@@ -529,6 +530,10 @@ func sendWhatsAppMessage(client *whatsmeow.Client, recipient string, message str
 				FileSHA256:    resp.FileSHA256,
 				FileLength:    &resp.FileLength,
 			}
+			if strings.TrimSpace(message) != "" {
+				document.Caption = proto.String(message)
+			}
+			msg.DocumentMessage = document
 		}
 	} else {
 		msg.Conversation = proto.String(message)

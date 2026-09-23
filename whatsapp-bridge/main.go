@@ -743,9 +743,24 @@ func (store *MessageStore) GetMediaInfo(id, chatJID string) (string, string, str
 	return mediaType, filename, url, mediaKey, fileSHA256, fileEncSHA256, fileLength, err
 }
 
-func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, messageID, chatJID string, logger leveledLogger) (bool, string, string, string, []byte, error) {
-	chatDir := fmt.Sprintf("%s/%s", storeBasePath, strings.ReplaceAll(chatJID, ":", "_"))
+func mediaCachePath(chatJID, messageID, filename string) (string, error) {
+	chatDir := filepath.Join(storeBasePath, strings.ReplaceAll(chatJID, ":", "_"))
+	safeID := strings.NewReplacer("/", "_", "\\", "_", ":", "_").Replace(strings.TrimSpace(messageID))
+	if safeID == "" || safeID == "." || safeID == ".." {
+		safeID = "message"
+	}
+	safeName := filepath.Base(strings.TrimSpace(filename))
+	if safeName == "" || safeName == "." || safeName == ".." {
+		safeName = "media"
+	}
+	dir := filepath.Join(chatDir, safeID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, safeName), nil
+}
 
+func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, messageID, chatJID string, logger leveledLogger) (bool, string, string, string, []byte, error) {
 	mediaType, filename, storedLocation, mediaKey, fileSHA256, fileEncSHA256, _, err := messageStore.GetMediaInfo(messageID, chatJID)
 	if err != nil {
 		err = messageStore.db.QueryRow(
@@ -761,11 +776,10 @@ func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, message
 		return false, "", "", "", nil, fmt.Errorf("not a media message")
 	}
 
-	if err := os.MkdirAll(chatDir, 0755); err != nil {
-		return false, "", "", "", nil, fmt.Errorf("failed to create chat directory: %v", err)
+	localPath, err := mediaCachePath(chatJID, messageID, filename)
+	if err != nil {
+		return false, "", "", "", nil, fmt.Errorf("failed to create media directory: %v", err)
 	}
-
-	localPath := fmt.Sprintf("%s/%s", chatDir, filename)
 	absPath, err := filepath.Abs(localPath)
 	if err != nil {
 		return false, "", "", "", nil, fmt.Errorf("failed to get absolute path: %v", err)
@@ -776,6 +790,7 @@ func downloadMedia(client *whatsmeow.Client, messageStore *MessageStore, message
 		if readErr != nil {
 			return false, "", "", "", nil, fmt.Errorf("failed to read existing media: %v", readErr)
 		}
+		logger.Infof("Reusing cached media for messageID=%s path=%s", messageID, absPath)
 		return true, mediaType, filename, absPath, data, nil
 	}
 

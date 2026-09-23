@@ -337,6 +337,13 @@ type SendDocumentRequest struct {
 	DataB64   string `json:"data_base64"`
 }
 
+type ReactRequest struct {
+	ChatJID   string `json:"chat_jid"`
+	SenderJID string `json:"sender_jid"`
+	MessageID string `json:"message_id"`
+	Emoji     string `json:"emoji"`
+}
+
 func parseRecipientJID(recipient string) (types.JID, error) {
 	recipient = strings.TrimSpace(recipient)
 	if strings.Contains(recipient, "@") {
@@ -349,6 +356,32 @@ func parseRecipientJID(recipient string) (types.JID, error) {
 		return types.JID{User: recipient, Server: "lid"}, nil
 	}
 	return types.JID{User: recipient, Server: "s.whatsapp.net"}, nil
+}
+
+func sendWhatsAppReaction(client *whatsmeow.Client, chatJID, senderJID, messageID, emoji string, logger leveledLogger) (bool, string) {
+	if !client.IsConnected() {
+		logger.Warnf("Cannot react in %s: client not connected", chatJID)
+		return false, "Not connected to WhatsApp"
+	}
+
+	chat, err := types.ParseJID(strings.TrimSpace(chatJID))
+	if err != nil {
+		return false, fmt.Sprintf("Error parsing chat JID: %v", err)
+	}
+	sender, err := types.ParseJID(strings.TrimSpace(senderJID))
+	if err != nil {
+		return false, fmt.Sprintf("Error parsing sender JID: %v", err)
+	}
+
+	_, err = client.SendMessage(
+		context.Background(),
+		chat,
+		client.BuildReaction(chat, sender, messageID, emoji),
+	)
+	if err != nil {
+		return false, fmt.Sprintf("Error sending reaction: %v", err)
+	}
+	return true, "reacted"
 }
 
 // Function to send a WhatsApp message
@@ -685,6 +718,7 @@ func notifyInboundWebhook(msg *events.Message, content, mediaType, filename, cha
 		"type":       "message_in",
 		"phone":      phone,
 		"sender":     sender,
+		"sender_jid": msg.Info.Sender.ToNonAD().String(),
 		"chat_jid":   chatJID,
 		"message_id": msg.Info.ID,
 		"content":    content,
@@ -936,6 +970,47 @@ func startRESTServer(client *whatsmeow.Client, messageStore *MessageStore, port 
 		logger.Infof("Received request to send document; recipient=%s filename=%s bytes=%d", req.Recipient, filename, len(payload))
 		success, message := sendWhatsAppMessage(client, req.Recipient, req.Caption, tmpPath, messageStore, logger)
 		logger.Infof("Send-document result for %s: success=%t detail=%s", req.Recipient, success, message)
+
+		w.Header().Set("Content-Type", "application/json")
+		if !success {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		_ = json.NewEncoder(w).Encode(SendMessageResponse{
+			Success: success,
+			Message: message,
+		})
+	})
+
+	http.HandleFunc("/api/react", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req ReactRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request format", http.StatusBadRequest)
+			logger.Warnf("Invalid react request payload: %v", err)
+			return
+		}
+		if req.ChatJID == "" || req.MessageID == "" || req.SenderJID == "" {
+			http.Error(w, "Chat JID, sender JID, and message ID are required", http.StatusBadRequest)
+			return
+		}
+
+		emoji := strings.TrimSpace(req.Emoji)
+		if emoji == "" {
+			emoji = "👍"
+		}
+		logger.Infof(
+			"Received request to react; chat=%s sender=%s messageID=%s emoji=%s",
+			req.ChatJID,
+			req.SenderJID,
+			req.MessageID,
+			emoji,
+		)
+		success, message := sendWhatsAppReaction(client, req.ChatJID, req.SenderJID, req.MessageID, emoji, logger)
+		logger.Infof("React result for %s: success=%t detail=%s", req.ChatJID, success, message)
 
 		w.Header().Set("Content-Type", "application/json")
 		if !success {
